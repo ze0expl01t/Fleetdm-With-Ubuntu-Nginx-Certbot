@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: fleetdm-mysql
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=fleetdm
+      - MYSQL_USER=fleetdm_user
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - fleet-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: fleetdm-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - fleet-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  fleet:
+    image: fleetdm/fleet:latest
+    container_name: fleetdm
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - FLEET_MYSQL_ADDRESS=mysql:3306
+      - FLEET_MYSQL_DATABASE=fleetdm
+      - FLEET_MYSQL_USERNAME=fleetdm_user
+      - FLEET_MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - FLEET_REDIS_ADDRESS=redis:6379
+      - FLEET_REDIS_PASSWORD=
+      - FLEET_SERVER_ADDRESS=0.0.0.0:8080
+      - FLEET_SERVER_TLS=false
+    networks:
+      - fleet-network
+    command: >
+      sh -c "
+      echo 'Checking if database needs initialization...';
+      fleet prepare db;
+      echo 'Starting Fleet server...';
+      fleet serve;
+      "
+
+volumes:
+  mysql-data:
+    driver: local
+  redis-data:
+    driver: local
+
+networks:
+  fleet-network:
+    driver: bridge
